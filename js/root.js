@@ -1,6 +1,7 @@
 const { MerkleTree } = require('merkletreejs')
 
-const keccak256 = require('keccak256')
+//const keccak256 = require('keccak256')
+const SHA256 = require('crypto-js/sha256')
 
 const whitelistedAddresses = [
     "0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2",
@@ -9,11 +10,11 @@ const whitelistedAddresses = [
     "0x617F2E2fD72FD9D5503197092aC168c91465E7f2"
 ]
 
-const leafNodes = whitelistedAddresses.map(addr=>keccak256(addr))
+const leafNodes = whitelistedAddresses.map(addr=>SHA256(addr))
 
 console.log("leafNodes:", leafNodes);
 
-const merkleTree = new MerkleTree(leafNodes, keccak256, {sortPairs:true})
+const merkleTree = new MerkleTree(leafNodes, SHA256, {sortPairs:true})
 
 //const roothash = merkleTree.getRoot().toString('bytes');
 
