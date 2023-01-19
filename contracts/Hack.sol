@@ -16,17 +16,24 @@ contract Hack is ERC721, ERC721URIStorage, ERC721Burnable, Ownable {
 
     uint256 public MINT_TRACKER;
 
-    uint256 public Max_Token = 10000;   // Max supply
+    uint256 public immutable Max_Token;   // Max supply
 
-    uint256 listPrice = 0.01 ether;     //List price
+    uint256 listPrice ;     //List price
 
     bool public allowMint;  
+
+    uint public immutable freeLimit;
 
     bytes32 public merkleRoot ;  // root to be generated from a function            
 
     mapping(address => bool) public whitelistClaimed;
 
-    constructor() ERC721("Hack NFT", "HACK") {}
+    constructor(uint _freeLimit , uint _listPrice , uint _maxToken , uint _MINT_TRACKER) ERC721("Hack NFT", "HACK") {
+        freeLimit = _freeLimit;
+        listPrice = _listPrice;
+        Max_Token = _maxToken;
+        MINT_TRACKER = _MINT_TRACKER;
+    }
 
     function _baseURI() internal pure override returns (string memory) {
         return "infura";
@@ -54,13 +61,8 @@ contract Hack is ERC721, ERC721URIStorage, ERC721Burnable, Ownable {
         allowMint = _allow;
     }
 
-    // function to set the max number of NFT to be minted in a particular installment
-
-    function setMaxMint(uint _maxMints) external onlyOwner {
-        require(_maxMints>0, "0 maxMints");
-        uint256 currentTokenId = _tokenIdCounter.current();
-        require(currentTokenId + _maxMints <= Max_Token, "overflow TOTAL_SUPPLY");
-        MINT_TRACKER = _maxMints;
+    function getFreeLimit() public view returns(uint){
+        return freeLimit;
     }
 
     function setMerkleRoot(bytes32 _merkleRoot) external onlyOwner {
@@ -73,6 +75,9 @@ contract Hack is ERC721, ERC721URIStorage, ERC721Burnable, Ownable {
         bytes32 leaf = keccak256(abi.encodePacked(msg.sender));
         require(MerkleProof.verify(_merkleProof , merkleRoot , leaf), "invalid proof.");
 
+        uint256 currentTokenId = _tokenIdCounter.current();
+        require(currentTokenId <= getFreeLimit(), "No free mints"); 
+        
         whitelistClaimed[msg.sender] = true;
 
         //NFT_Mint(msg.sender);
@@ -81,23 +86,20 @@ contract Hack is ERC721, ERC721URIStorage, ERC721Burnable, Ownable {
     }
 
     function _mint(address to, string memory uri) private {
-        _tokenIdCounter.increment();
-        uint256 currentTokenId = _tokenIdCounter.current();
-        
-        require(currentTokenId<= Max_Token,"maximum limit reached");
-        //_safeMint(to, currentTokenId);
-        //_setTokenURI(currentTokenId, uri);
-        //assert(currentTokenId <= Max_Token);
+
+        require(allowMint == true, "Mint not allowed");
         _mintByInstallmentCounter.increment();
         uint256 currentMintByInstallmentCounter = _mintByInstallmentCounter.current();
 
-         if(currentMintByInstallmentCounter > MINT_TRACKER) {
+         if(currentMintByInstallmentCounter == MINT_TRACKER) {
             _mintByInstallmentCounter.reset();
             allowMint = false;
-            revert("Mints disabled temporilly");
         }
 
-         require(allowMint == true, "Mint not allowed");
+          _tokenIdCounter.increment();
+        uint256 currentTokenId = _tokenIdCounter.current();
+        
+        require(currentTokenId<= Max_Token,"maximum limit reached");
 
          _safeMint(to,currentTokenId);
          _setTokenURI(currentTokenId, uri);
@@ -107,13 +109,20 @@ contract Hack is ERC721, ERC721URIStorage, ERC721Burnable, Ownable {
     function safeMint(string memory uri) external payable returns(uint) {
         
         uint256 currentTokenId = _tokenIdCounter.current();
-        require(currentTokenId > 1000, "After 1000 mints"); // This function can be only called after 1k link
+        require(currentTokenId >= freeLimit, "After free mints"); // This function can be only called after 1k link
         
         require(msg.value >= listPrice , "Send enough ether to list");
 
          _mint(msg.sender, uri);
    
         return currentTokenId;
+    }
+    
+    function setMaxMintPerRound(uint _maxMints) external onlyOwner {
+        require(_maxMints>0, "0 maxMints");
+        uint256 currentTokenId = _tokenIdCounter.current();
+        require(currentTokenId + _maxMints <= Max_Token, "overflow TOTAL_SUPPLY");
+        MINT_TRACKER = _maxMints;
     }
 
     // The following functions are overrides required by Solidity.
