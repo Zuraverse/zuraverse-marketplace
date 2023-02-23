@@ -2,14 +2,15 @@
 pragma solidity ^0.8.9;
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
-import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Burnable.sol";
+import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/Counters.sol";
 import "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
-contract Hack is ERC721, ERC721URIStorage, ERC721Burnable, Ownable, ReentrancyGuard {
+contract Hack is ERC721, ERC721Enumerable, ERC721URIStorage, Pausable, Ownable, ReentrancyGuard {
     
     using Counters for Counters.Counter;
     Counters.Counter private _tokenIdCounter;
@@ -33,17 +34,21 @@ contract Hack is ERC721, ERC721URIStorage, ERC721Burnable, Ownable, ReentrancyGu
 
     mapping(address => bool) public whitelistClaimed;
 
-    constructor(uint _freeLimit , uint _listPrice , uint _maxToken , uint _MINT_TRACKER, uint _freeLimitPeriod) ERC721("Hack NFT", "HACK") {
+    constructor(uint _freeLimit , uint _listPrice , uint _maxToken , uint _freeLimitPeriod) ERC721("Hack NFT", "HACK") {
         freeLimit = _freeLimit;
         listPrice = _listPrice;
         Max_Token = _maxToken;
-        MINT_TRACKER = _MINT_TRACKER;
+        MINT_TRACKER = _freeLimit; // first round is equal to amount of free NFTs
         genesisTime = block.timestamp;
         freeLimitPeriod = _freeLimitPeriod;
     }
 
     function _baseURI() internal pure override returns (string memory) {
-        return "infura";
+        return "https://zuraverse.infura-ipfs.io/ipfs/QmXb5ExUpu5uT3fLNwgWdPM5ePSDhK4mBBgfXBmnA12GUo/";
+    }
+
+    function isMintAllowed() public view returns (bool) {
+        return allowMint;
     }
 
     // Getter function for Listing price 
@@ -64,6 +69,18 @@ contract Hack is ERC721, ERC721URIStorage, ERC721Burnable, Ownable, ReentrancyGu
         return merkleRoot;
     }
 
+    function isFreeLimitPeriodOver() public view returns(bool) {
+        return block.timestamp > genesisTime + freeLimitPeriod;
+    }
+
+    function pause() public onlyOwner {
+        _pause();
+    }
+
+    function unpause() public onlyOwner {
+        _unpause();
+    }
+
     // Function for updating listing price
 
     function updateListPrice(uint256 _listPrice) external onlyOwner payable {
@@ -78,6 +95,10 @@ contract Hack is ERC721, ERC721URIStorage, ERC721Burnable, Ownable, ReentrancyGu
 
     function setMerkleRoot(bytes32 _merkleRoot) external onlyOwner {
         merkleRoot = _merkleRoot;
+    }
+
+    function totalTokensMinted() public view returns (uint) {
+        return _tokenIdCounter.current();
     }
 
     function freeMint(address to, string memory uri, bytes32[] calldata _merkleProof) public nonReentrant {
@@ -98,6 +119,7 @@ contract Hack is ERC721, ERC721URIStorage, ERC721Burnable, Ownable, ReentrancyGu
     function _mint(address to, string memory uri) private {
 
         require(allowMint == true, "Mint not allowed");
+
         _mintByInstallmentCounter.increment();
         uint256 currentMintByInstallmentCounter = _mintByInstallmentCounter.current();
 
@@ -109,17 +131,17 @@ contract Hack is ERC721, ERC721URIStorage, ERC721Burnable, Ownable, ReentrancyGu
         _tokenIdCounter.increment();
         uint256 currentTokenId = _tokenIdCounter.current();
         
-        require(currentTokenId<= Max_Token,"maximum limit reached");
+        require(currentTokenId<= Max_Token,"All tokens minted");
 
         _safeMint(to,currentTokenId);
         _setTokenURI(currentTokenId, uri);
 
     }
 
-    function safeMint(string memory uri) external payable nonReentrant returns(uint) {
+    function mint(string memory uri) external payable nonReentrant returns(uint) {
         
         uint256 currentTokenId = _tokenIdCounter.current();
-        require(block.timestamp < genesisTime + freeLimitPeriod || currentTokenId >= freeLimit, "After free mints"); // This function can be only called after 1k link
+        require(isFreeLimitPeriodOver() || currentTokenId >= freeLimit, "After free mints"); // This function can be only called after 1k link
         
         require(msg.value >= listPrice , "Send enough ether to list");
 
@@ -149,4 +171,23 @@ contract Hack is ERC721, ERC721URIStorage, ERC721Burnable, Ownable, ReentrancyGu
     {
         return super.tokenURI(tokenId);
     }
+
+    function supportsInterface(bytes4 interfaceId)
+        public
+        view
+        override(ERC721, ERC721Enumerable)
+        returns (bool)
+    {
+        return super.supportsInterface(interfaceId);
+    }
+
+    function _beforeTokenTransfer(address from, address to, uint256 tokenId, uint256 batchSize)
+        internal
+        whenNotPaused
+        override(ERC721, ERC721Enumerable)
+    {
+        super._beforeTokenTransfer(from, to, tokenId, batchSize);
+    }
+
+    
 }
