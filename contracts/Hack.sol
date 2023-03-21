@@ -4,157 +4,161 @@ pragma solidity ^0.8.9;
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/Counters.sol";
 import "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
-contract Hack is ERC721, ERC721Enumerable, ERC721URIStorage, Pausable, Ownable, ReentrancyGuard {
+contract Hack is ERC721, ERC721Enumerable, ERC721URIStorage, Ownable, ReentrancyGuard {
     
     using Counters for Counters.Counter;
-    Counters.Counter private _tokenIdCounter;
-    Counters.Counter private _mintByInstallmentCounter;
+    Counters.Counter private _tokenIdCounter; // Count minted tokens
 
-    uint256 private MINT_TRACKER;
+    uint256 private immutable Hack_Max_Supply;   // Max HACK NFT supply
 
-    uint256 private immutable Max_Token;   // Max supply
+    uint private immutable Whitelist_Limit; // Max free NFTs
 
     uint256 private listPrice ;     //List price
 
-    bool private allowMint;  
+    bool private paidMintAllowed; // param to start/stop paid minting
 
-    uint private immutable freeLimit;
+    bool private whitelistMintAllowed;  // param to start/stop whitelist minting
 
-    uint private immutable freeLimitPeriod; // Max time period of free minting. Ex - 10 minutes, 3 days etc 
+    uint private mintFrom; // The id from where minting is allowed in that round
 
-    uint private immutable genesisTime; // time at which contract was deployed
+    uint private mintUpto; // The id upto which minting is allowed in that round
 
     bytes32 private merkleRoot ;  // root to be generated from a function            
 
-    mapping(address => bool) public whitelistClaimed;
+    mapping(address => bool) public whitelistClaimed; // True once Whitelist claimed
 
-    constructor(uint _freeLimit , uint _listPrice , uint _maxToken , uint _freeLimitPeriod) ERC721("Hack NFT", "HACK") {
-        freeLimit = _freeLimit;
+    mapping(uint => bool) public tokenMintStatus; // True once minted
+
+    /// @param maxWhitelistNfts total number of whitelisted nfts
+    /// @param _listPrice price in eth for paid NFTs. This can be updated anytime
+    /// @param _maxAmount total supply of HACK nfts
+    constructor(uint maxWhitelistNfts, uint _listPrice , uint _maxAmount) ERC721("Hack NFT", "HACK") {
+        require(_maxAmount>=maxWhitelistNfts, "Hack_Max_Supply<maxWhitelistNfts");
+        require(maxWhitelistNfts>0, "maxWhitelistNfts<1");
+        require(listPrice> 10000000 gwei, "listPrice<1gwei");
+        Whitelist_Limit = maxWhitelistNfts;
+        mintFrom = 1;
+        mintUpto = maxWhitelistNfts;
         listPrice = _listPrice;
-        Max_Token = _maxToken;
-        MINT_TRACKER = _freeLimit; // first round is equal to amount of free NFTs
-        genesisTime = block.timestamp;
-        freeLimitPeriod = _freeLimitPeriod;
+        Hack_Max_Supply = _maxAmount;
+        whitelistMintAllowed = true;
     }
+
+    /** Modifiers */
+
+    modifier whenNotPaused(bool mint_type) {
+        _requireNotPaused(mint_type);
+        _;
+    }
+
+    modifier validateMintId(uint id) {
+        require(id>0 && id<= Hack_Max_Supply,"Invalid Token Id");
+        require(id >= getMintFromId() && id <= getMintUptoId(), "Token Id Out of Range");
+        _;
+    }
+
+    /** Getter functions */ 
 
     function _baseURI() internal pure override returns (string memory) {
         return "https://zuraverse.infura-ipfs.io/ipfs/QmXb5ExUpu5uT3fLNwgWdPM5ePSDhK4mBBgfXBmnA12GUo/";
     }
 
-    function isMintAllowed() public view returns (bool) {
-        return allowMint;
+    function isPaidMintAllowed() public view returns (bool) {
+        return paidMintAllowed;
     }
 
-    // Getter function for Listing price 
+    function isWhitelistMintAllowed() public view returns (bool) {
+        return whitelistMintAllowed;
+    }
 
     function getListprice() public view returns (uint256) {
         return listPrice;
     }
 
-    function mintInstallemntcounter() public view returns(uint){
-        return _mintByInstallmentCounter.current();
+    function getMintFromId() view public returns (uint) {
+        return mintFrom;
     }
 
-    function getFreeLimit() public view returns(uint){
-        return freeLimit;
+    function getMintUptoId() view public returns (uint) {
+        return mintUpto;
+    }
+
+    function getMaxWhitelist() public view returns(uint){
+        return Whitelist_Limit;
     }
 
     function getMerkleRoot() public view returns(bytes32){
         return merkleRoot;
     }
 
-    function isFreeLimitPeriodOver() public view returns(bool) {
-        return block.timestamp > genesisTime + freeLimitPeriod;
+    function totalTokensMinted() public view returns (uint) {
+        return _tokenIdCounter.current();
     }
 
-    function pause() public onlyOwner {
-        _pause();
+    /** Setter functions */
+
+    function pauseWhitelistMinting(bool _pause) public onlyOwner {
+        whitelistMintAllowed = _pause;
     }
 
-    function unpause() public onlyOwner {
-        _unpause();
+    function pausePaidMinting(bool _pause) public onlyOwner {
+        paidMintAllowed = _pause;
     }
 
     // Function for updating listing price
-
     function updateListPrice(uint256 _listPrice) external onlyOwner payable {
         listPrice = _listPrice;
-    }
-
-    // Function for re-allow minting after the installment is over
-
-    function allowMinting(bool _allow) external onlyOwner{
-        allowMint = _allow;
     }
 
     function setMerkleRoot(bytes32 _merkleRoot) external onlyOwner {
         merkleRoot = _merkleRoot;
     }
 
-    function totalTokensMinted() public view returns (uint) {
-        return _tokenIdCounter.current();
+    function setMintIdsPerRound(uint _from, uint _upto) external onlyOwner {
+        require(_from>0 && _upto > _from, "Invalid id values");
+        require(_upto <=Hack_Max_Supply, "overflow TOTAL_SUPPLY");
+        mintFrom = _from;
+        mintUpto = _upto;
     }
 
-    function freeMint(address to, string memory uri, bytes32[] calldata _merkleProof) public nonReentrant {
+    function freeMint(uint256 currentTokenId, string memory uri, bytes32[] calldata _merkleProof) public whenNotPaused(whitelistMintAllowed) {
         require(!whitelistClaimed[msg.sender],"Address has already claimed.");
 
         bytes32 leaf = keccak256(abi.encodePacked(msg.sender));
         require(MerkleProof.verify(_merkleProof , merkleRoot , leaf), "invalid proof.");
-
-        uint256 currentTokenId = _tokenIdCounter.current();
-        require(currentTokenId <= getFreeLimit(), "No free mints"); 
-        
+  
         whitelistClaimed[msg.sender] = true;
 
-        _mint(to, uri);
+        _mint(msg.sender, currentTokenId, uri);
 
     }
 
-    function _mint(address to, string memory uri) private {
-
-        require(allowMint == true, "Mint not allowed");
-
-        _mintByInstallmentCounter.increment();
-        uint256 currentMintByInstallmentCounter = _mintByInstallmentCounter.current();
-
-         if(currentMintByInstallmentCounter == MINT_TRACKER) {
-            _mintByInstallmentCounter.reset();
-            allowMint = false;
-        }
-
-        _tokenIdCounter.increment();
-        uint256 currentTokenId = _tokenIdCounter.current();
-        
-        require(currentTokenId<= Max_Token,"All tokens minted");
-
-        _safeMint(to,currentTokenId);
-        _setTokenURI(currentTokenId, uri);
-
-    }
-
-    function mint(string memory uri) external payable nonReentrant returns(uint) {
-        
-        uint256 currentTokenId = _tokenIdCounter.current();
-        require(isFreeLimitPeriodOver() || currentTokenId >= freeLimit, "After free mints"); // This function can be only called after 1k link
+    function mint(uint256 currentTokenId, string memory uri) external payable whenNotPaused(paidMintAllowed) {
         
         require(msg.value >= listPrice , "Send enough ether to list");
+         _mint(msg.sender, currentTokenId, uri);
 
-         _mint(msg.sender, uri);
-   
-        return currentTokenId;
     }
-    
-    function setMaxMintPerRound(uint _maxMints) external onlyOwner {
-        require(_maxMints>0, "0 maxMints");
-        uint256 currentTokenId = _tokenIdCounter.current();
-        require(currentTokenId + _maxMints <= Max_Token, "overflow TOTAL_SUPPLY");
-        MINT_TRACKER = _maxMints;
+
+    function _mint(address to, uint256 tokenId, string memory uri) private nonReentrant validateMintId(tokenId) {
+        assert(tokenMintStatus[tokenId] == false);
+        assert(tokenId>=mintFrom && tokenId<=mintUpto);
+        tokenMintStatus[tokenId] = true;
+        _safeMint(to,tokenId);
+        _setTokenURI(tokenId, uri);
+        _tokenIdCounter.increment();
+    }
+
+    /**
+     * @dev Throws if the contract is paused.
+     */
+    function _requireNotPaused(bool mint_type) internal view virtual {
+        require((mint_type == paidMintAllowed || mint_type == whitelistMintAllowed) && !mint_type, "Pausable: paused");
     }
 
     // The following functions are overrides required by Solidity.
@@ -183,11 +187,9 @@ contract Hack is ERC721, ERC721Enumerable, ERC721URIStorage, Pausable, Ownable, 
 
     function _beforeTokenTransfer(address from, address to, uint256 tokenId, uint256 batchSize)
         internal
-        whenNotPaused
         override(ERC721, ERC721Enumerable)
     {
         super._beforeTokenTransfer(from, to, tokenId, batchSize);
     }
-
-    
+   
 }
