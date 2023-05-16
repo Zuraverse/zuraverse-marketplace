@@ -20,9 +20,13 @@ contract Hack is ERC721, ERC721Enumerable, ERC721URIStorage, Ownable, Reentrancy
 
     uint256 private listPrice ;     //List price
 
+    uint256 private specialPrice;
+
     bool private paidMintAllowed; // param to start/stop paid minting
 
     bool private whitelistMintAllowed;  // param to start/stop whitelist minting
+
+    bool private specialMintAllowed; 
 
     uint private mintFrom; // The id from where minting is allowed in that round
 
@@ -32,15 +36,18 @@ contract Hack is ERC721, ERC721Enumerable, ERC721URIStorage, Ownable, Reentrancy
 
     mapping(address => bool) public whitelistClaimed; // True once Whitelist claimed
 
+    mapping(address => bool) public specialMintClaimed;
+
     mapping(uint => bool) public tokenMintStatus; // True once minted
 
     /// @param maxWhitelistNfts total number of whitelisted nfts
     /// @param _listPrice price in eth for paid NFTs. This can be updated anytime
     /// @param _maxAmount total supply of HACK nfts
-    constructor(uint maxWhitelistNfts, uint _listPrice , uint _maxAmount) ERC721("Hack NFT", "HACK") {
+    constructor(uint maxWhitelistNfts, uint _listPrice , uint _maxAmount) 
+    ERC721("Hippie Alien Cosmic Klub", "HACK") {
         require(_maxAmount>=maxWhitelistNfts, "Hack_Max_Supply<maxWhitelistNfts");
         require(maxWhitelistNfts>0, "maxWhitelistNfts<1");
-        require(listPrice> 10000000 gwei, "listPrice<1gwei");
+        require(_listPrice >= 10000000000000000, "listPrice<1gwei");
         Whitelist_Limit = maxWhitelistNfts;
         mintFrom = 1;
         mintUpto = maxWhitelistNfts;
@@ -76,8 +83,16 @@ contract Hack is ERC721, ERC721Enumerable, ERC721URIStorage, Ownable, Reentrancy
         return whitelistMintAllowed;
     }
 
-    function getListprice() public view returns (uint256) {
+    function isSpecialMintAllowed() public view returns (bool) {
+        return specialMintAllowed;
+    }
+
+    function getListPrice() public view returns (uint256) {
         return listPrice;
+    }
+
+    function getSpecialPrice() public view returns (uint256) {
+        return specialPrice;
     }
 
     function getMintFromId() view public returns (uint) {
@@ -102,17 +117,26 @@ contract Hack is ERC721, ERC721Enumerable, ERC721URIStorage, Ownable, Reentrancy
 
     /** Setter functions */
 
-    function pauseWhitelistMinting(bool _pause) public onlyOwner {
+    function allowWhitelistMinting(bool _pause) public onlyOwner {
         whitelistMintAllowed = _pause;
     }
 
-    function pausePaidMinting(bool _pause) public onlyOwner {
+    function allowSpecialMinting(bool _pause) public onlyOwner {
+        specialMintAllowed = _pause;
+    }
+
+    function allowPaidMinting(bool _pause) public onlyOwner {
         paidMintAllowed = _pause;
     }
 
     // Function for updating listing price
     function updateListPrice(uint256 _listPrice) external onlyOwner payable {
         listPrice = _listPrice;
+    }
+
+    // specialPrice
+    function updateSpecialPrice(uint256 _price) external onlyOwner payable {
+        specialPrice = _price;
     }
 
     function setMerkleRoot(bytes32 _merkleRoot) external onlyOwner {
@@ -128,6 +152,7 @@ contract Hack is ERC721, ERC721Enumerable, ERC721URIStorage, Ownable, Reentrancy
 
     function freeMint(uint256 currentTokenId, string memory uri, bytes32[] calldata _merkleProof) public whenNotPaused(whitelistMintAllowed) {
         require(!whitelistClaimed[msg.sender],"Address has already claimed.");
+        require(totalTokensMinted() <= getMaxWhitelist(),"Max free mints limit reached.");
 
         bytes32 leaf = keccak256(abi.encodePacked(msg.sender));
         require(MerkleProof.verify(_merkleProof , merkleRoot , leaf), "invalid proof.");
@@ -145,6 +170,20 @@ contract Hack is ERC721, ERC721Enumerable, ERC721URIStorage, Ownable, Reentrancy
 
     }
 
+    function specialMint(uint256 currentTokenId, string memory uri, bytes32[] calldata _merkleProof) external payable whenNotPaused(specialMintAllowed) {
+        require(!specialMintClaimed[msg.sender],"Address has already claimed.");
+        require(totalTokensMinted() <= getMaxWhitelist(),"Max free mints limit reached.");
+        require(msg.value >= specialPrice , "lower than specialPrice");
+        require(!whitelistMintAllowed, "Not allowed during whitelist round");
+
+        bytes32 leaf = keccak256(abi.encodePacked(msg.sender));
+        require(MerkleProof.verify(_merkleProof , merkleRoot , leaf), "invalid proof.");
+  
+        specialMintClaimed[msg.sender] = true;
+
+        _mint(msg.sender, currentTokenId, uri);
+    }
+
     function _mint(address to, uint256 tokenId, string memory uri) private nonReentrant validateMintId(tokenId) {
         assert(tokenMintStatus[tokenId] == false);
         assert(tokenId>=mintFrom && tokenId<=mintUpto);
@@ -158,7 +197,7 @@ contract Hack is ERC721, ERC721Enumerable, ERC721URIStorage, Ownable, Reentrancy
      * @dev Throws if the contract is paused.
      */
     function _requireNotPaused(bool mint_type) internal view virtual {
-        require((mint_type == paidMintAllowed || mint_type == whitelistMintAllowed) && !mint_type, "Pausable: paused");
+        require((mint_type == paidMintAllowed || mint_type == whitelistMintAllowed) && mint_type, "Pausable: paused");
     }
 
     // The following functions are overrides required by Solidity.
