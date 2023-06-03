@@ -72,7 +72,7 @@ contract Hack is ERC721, ERC721Enumerable, ERC721URIStorage, Ownable, Reentrancy
     /** Getter functions */ 
 
     function _baseURI() internal pure override returns (string memory) {
-        return "https://zuraverse.infura-ipfs.io/ipfs/QmXb5ExUpu5uT3fLNwgWdPM5ePSDhK4mBBgfXBmnA12GUo/";
+        return "ipfs://bafybeibcm4jp3cdchok6wf2t4jyx3g2qljavnpsjmq3ip3fednayle4yoy/";
     }
 
     function isPaidMintAllowed() public view returns (bool) {
@@ -130,12 +130,12 @@ contract Hack is ERC721, ERC721Enumerable, ERC721URIStorage, Ownable, Reentrancy
     }
 
     // Function for updating listing price
-    function updateListPrice(uint256 _listPrice) external onlyOwner payable {
+    function updateListPrice(uint256 _listPrice) external onlyOwner {
         listPrice = _listPrice;
     }
 
     // specialPrice
-    function updateSpecialPrice(uint256 _price) external onlyOwner payable {
+    function updateSpecialPrice(uint256 _price) external onlyOwner {
         specialPrice = _price;
     }
 
